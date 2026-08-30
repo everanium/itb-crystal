@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+#
+# eitb -- launcher for the eitb CLI. Builds the Crystal binary on
+# first use (or after a clean), then forwards every argument to it.
+
+set -eu
+set -o pipefail
+
+cd "$(dirname "$0")/.."
+
+if [[ ! -x bin/eitb || eitb/itb_eitb.cr -nt bin/eitb ]]; then
+    ./build.sh >&2
+fi
+
+exec bin/eitb "$@"

@@ -1,5 +1,5 @@
 name: itb
-version: 0.3.0
+version: 0.3.1
 
 description: |
   Crystal binding for the ITB Triple Pipeline — a thin proxy over the

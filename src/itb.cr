@@ -24,7 +24,7 @@ require "./itb/stream"
 
 module ITB
   # Binding version (matches shard.yml).
-  VERSION = "0.3.0"
+  VERSION = "0.3.1"
 
   # Shipped profile identifiers, mirrored from the Go triple package
   # registry in declaration order. The C ABI exposes no profile

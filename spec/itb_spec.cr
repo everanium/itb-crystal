@@ -27,7 +27,7 @@ end
 describe ITB do
   it "reports the library and binding versions" do
     ITB.version.should_not be_empty
-    ITB::VERSION.should eq "0.3.0"
+    ITB::VERSION.should eq "0.3.1"
   end
 
   it "lists the hash registry in canonical order" do
@@ -195,6 +195,22 @@ describe ITB do
     q.should eq "pm=ab01&withParallax=true&nonceBits=512&" \
                 "innerHash=areion512&parallaxPalette=aescmac,chacha20,blake3&" \
                 "mode=a%20b%26c%3Dd%25"
+  end
+
+  it "typed with_inner_hashes overrides the profile constellation" do
+    # Base profile is a shipped single-primitive width-512 Single
+    # Message profile; the per-call with_inner_hashes override
+    # rebinds all 8 slots to an alternate width-512 constellation
+    # for one Pipeline pair without touching the shipped registry.
+    override = ITB::Opts.new.with_inner_hashes([
+      "areion512", "blake2b512", "areion512", "blake2b512",
+      "areion512", "blake2b512", "areion512", "blake2b512",
+    ])
+    sender = ITB::Pipeline.new("singlemsg-triple-mac-v1", opts: override)
+    receiver = ITB::Pipeline.new(
+      "singlemsg-triple-mac-v1", sender.blob, override)
+    plain = payload(2048, 43_u64)
+    receiver.decrypt_message(sender.encrypt_message(plain)).should eq plain
   end
 
   it "pins the parent pipeline while a stream session lives" do

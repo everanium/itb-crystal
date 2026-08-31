@@ -64,6 +64,18 @@ module ITB
       with_raw("innerHash", name)
     end
 
+    # Per-call constellation override mirroring the Go-side
+    # `Opts.MixedHashes [8]string` field: the 8 slot names are
+    # comma-joined into the `innerHashes` pass-through key in the
+    # slot order `[noise, lock, data1, data2, data3, start1, start2,
+    # start3]`. Fail-fast validation surfaces at Init on the Go side;
+    # a typo'd slot or width mismatch surfaces with an error naming
+    # the offending slot. When both this and `with_inner_hash` are
+    # set, the mixed override wins on the Go side.
+    def with_inner_hashes(names : Enumerable(String)) : self
+      with_raw("innerHashes", names.join(","))
+    end
+
     def with_outer_cipher(name : String) : self
       with_raw("outerCipher", name)
     end

@@ -48,7 +48,7 @@ cd bindings/crystal && crystal build -o bin/eitb eitb/itb_eitb.cr
 Hosts without AVX-512+VL: pass `--noitbasm` to `build.sh` to opt out
 of ITB's chain-absorb asm.
 
-## Library resolution
+## Library lookup order
 
 Linking is resolved at **compile time** through the
 `@[Link(ldflags: ...)]` annotation in `src/itb/ffi_bridge.cr`, which
@@ -105,10 +105,6 @@ pipe = ITB::Pipeline.new("singlemsg-triple-nomac-v1", opts: opts)
 # Master rotation refreshes the exported blob.
 pipe.rekey(perm_master, wrap_master)
 
-# Go runtime knobs (a negative value queries without changing).
-ITB.set_memory_limit(512_i64 << 20)
-ITB.set_gc_percent(20)
-
 # Registry roster.
 ITB.version  # => libitb version string
 ITB.hashes   # => [ITB::HashInfo(name, width), ...] in canonical order
@@ -143,6 +139,21 @@ deterministic release. A stream session holds a reference to its
 parent Pipeline, so the parent cannot be collected while the session
 is reachable.
 
+## Memory
+
+Two process-wide knobs constrain Go runtime arena pacing, readable at
+libitb load time via env vars (`ITB_GOMEMLIMIT`, `ITB_GOGC`) and
+adjustable at any time programmatically. Pass a negative value to
+query without changing. Long-running or allocation-heavy workloads
+(benchmarks, bulk encryption) should set both — without a soft cap +
+aggressive GC the Go scratch heap grows unboundedly under allocation
+churn:
+
+```crystal
+ITB.set_memory_limit(512_i64 << 20) # 512 MiB soft cap
+ITB.set_gc_percent(20)              # aggressive GC
+```
+
 ## Testing
 
 ```bash
@@ -172,7 +183,7 @@ off, No MAC profiles, 5 s wall-clock per case; see
 `ITB_KEY_BITS`, `ITB_NONCE_BITS`, `ITB_WITH_PARALLAX`,
 `ITB_WITH_WRAPPER`, `ITB_PROFILE`, `ITB_BENCH_MIN_SEC`.
 
-## eitb CLI
+## eitb utility
 
 ```bash
 ./bindings/crystal/eitb/eitb version

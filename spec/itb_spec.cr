@@ -27,7 +27,7 @@ end
 describe ITB do
   it "reports the library and binding versions" do
     ITB.version.should_not be_empty
-    ITB::VERSION.should eq "0.3.3"
+    ITB::VERSION.should eq "0.3.4"
   end
 
   it "lists the hash registry in canonical order" do

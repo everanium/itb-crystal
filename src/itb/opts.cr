@@ -8,7 +8,8 @@
 
 module ITB
   # Fluent builder producing the URL-query-encoded opts string
-  # consumed by `Pipeline.new` and `ITB.register_profile`.
+  # consumed by `Pipeline.new`. Profile records for `ITB.register` are
+  # built with `ITB::Profile`.
   class Opts
     def initialize
       @pairs = [] of {String, String}
@@ -86,8 +87,7 @@ module ITB
     end
 
     # Escape hatch appending a raw `key=value` pair. Covers every key
-    # the Go side accepts, including the register-profile grammar
-    # (`mode`, `width`, `innerHashes`, `parallaxOn`, `wrapperOn`, …).
+    # the Go side accepts.
     def with_raw(key : String, value : String) : self
       @pairs << {key, value}
       self

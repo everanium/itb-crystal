@@ -3,19 +3,19 @@
 # Subcommands:
 #
 #     eitb version                                library + binding versions
-#     eitb hashes                                 shipped hash primitive roster
-#     eitb profiles                               built-in Triple profile names
+#     eitb profiles                               registered profile catalogue
 #     eitb encrypt <profile> <in-file> <out-file> Single Message encrypt
 #     eitb decrypt <profile> <blob-hex> <in-file> <out-file>
 #
 # `encrypt` prints the session blob to stderr as hex; feed that hex
-# back to `decrypt` on the receiving side.
+# back to `decrypt` on the receiving side. `profiles` lists the
+# registered profile catalogue one name per line; the profiles that
+# carry a cipher surface are the ones `encrypt` / `decrypt` accept.
 
 require "../src/itb"
 
 USAGE = <<-USAGE
 usage: eitb version
-       eitb hashes
        eitb profiles
        eitb encrypt <profile> <in-file> <out-file>
        eitb decrypt <profile> <blob-hex> <in-file> <out-file>
@@ -24,12 +24,6 @@ USAGE
 def cmd_version : Nil
   puts "libitb #{ITB.version}"
   puts "itb-crystal #{ITB::VERSION}"
-end
-
-def cmd_hashes : Nil
-  ITB.hashes.each_with_index do |h, i|
-    printf("%2d  %-12s %d bits\n", i, h.name, h.width)
-  end
 end
 
 def cmd_profiles : Nil
@@ -55,7 +49,7 @@ def cmd_encrypt(profile : String, infile : String, outfile : String) : Nil
   wire = streaming_profile?(profile) ? pipe.encrypt_stream_one_shot(plain) : pipe.encrypt_message(plain)
   ensure_parent_dir(outfile)
   File.write(outfile, wire)
-  STDERR.puts pipe.blob.hexstring
+  STDERR.puts pipe.save.hexstring
   puts "encrypted #{infile} -> #{outfile} (#{plain.size} -> #{wire.size} bytes)"
   pipe.free
 end
@@ -63,7 +57,7 @@ end
 def cmd_decrypt(profile : String, blob_hex : String, infile : String, outfile : String) : Nil
   blob = blob_hex.hexbytes
   wire = File.read(infile).to_slice
-  pipe = ITB::Pipeline.new(profile, blob)
+  pipe = ITB::Pipeline.load(blob)
   plain = streaming_profile?(profile) ? pipe.decrypt_stream_one_shot(wire) : pipe.decrypt_message(wire)
   ensure_parent_dir(outfile)
   File.write(outfile, plain)
@@ -75,7 +69,6 @@ args = ARGV
 begin
   case {args[0]?, args.size}
   when {"version", 1}  then cmd_version
-  when {"hashes", 1}   then cmd_hashes
   when {"profiles", 1} then cmd_profiles
   when {"encrypt", 4}  then cmd_encrypt(args[1], args[2], args[3])
   when {"decrypt", 5}  then cmd_decrypt(args[1], args[2], args[3], args[4])

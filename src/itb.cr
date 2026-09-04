@@ -11,7 +11,7 @@
 # require "itb"
 #
 # sender = ITB::Pipeline.new("singlemsg-triple-mac-v1")
-# receiver = ITB::Pipeline.new("singlemsg-triple-mac-v1", sender.blob)
+# receiver = ITB::Pipeline.load(sender.save)
 # wire = sender.encrypt_message("hello".to_slice)
 # receiver.decrypt_message(wire) # => "hello".to_slice
 # ```
@@ -19,53 +19,51 @@
 require "./itb/ffi_bridge"
 require "./itb/errors"
 require "./itb/opts"
+require "./itb/profile"
 require "./itb/pipeline"
 require "./itb/stream"
 
 module ITB
   # Binding version (matches shard.yml).
-  VERSION = "0.3.5"
+  VERSION = "0.4.1"
 
-  # Shipped profile identifiers, mirrored from the Go triple package
-  # registry in declaration order. The C ABI exposes no profile
-  # enumeration, so the roster is pinned here; profiles registered at
-  # runtime via `ITB.register_profile` are not included.
-  PROFILES = [
-    "streaming-aead-triple-mac-v1",
-    "streaming-noaead-triple-v1",
-    "singlemsg-triple-mac-v1",
-    "singlemsg-triple-nomac-v1",
-    "blob-triple-mac-v1",
-    "streaming-aead-triple-mac-mixed-v1",
-    "streaming-noaead-triple-mixed-v1",
-    "singlemsg-triple-mac-mixed-v1",
-    "singlemsg-triple-nomac-mixed-v1",
-  ]
-
-  # One shipped hash-registry row (`ITB_HashName` / `ITB_HashWidth`).
-  record HashInfo, name : String, width : Int32
+  # Floor capacity for profile-JSON output buffers (inspect / lookup
+  # / profiles).
+  JSON_CAP = 4096
 
   # Returns the libitb library version string.
   def self.version : String
     read_cstr { |out_p, cap, len_p| LibItb.version(out_p, cap, len_p) }
   end
 
-  # Returns the shipped hash primitive registry in canonical order.
-  def self.hashes : Array(HashInfo)
-    n = LibItb.hash_count
-    Array(HashInfo).new(n) do |i|
-      buf = Bytes.new(128)
-      len = LibC::SizeT.zero
-      rc = LibItb.hash_name(i, buf.to_unsafe.as(LibC::Char*), LibC::SizeT.new(buf.size), pointerof(len))
-      raise Error.from_rc(rc) unless rc == Status::Ok.value
-      name = String.new(buf[0, len > 0 ? len - 1 : LibC::SizeT.zero])
-      HashInfo.new(name, LibItb.hash_width(i))
+  # Returns the sorted names of every registered profile — the shipped
+  # catalogue plus prior `ITB.register` calls (`ITB_Triple_Profiles`).
+  def self.profiles : Array(String)
+    json = retry_once(JSON_CAP) do |buf, len_p|
+      LibItb.triple_profiles(buf.to_unsafe.as(Void*), LibC::SizeT.new(buf.size), len_p)
     end
+    Profile.strings_from_json(String.new(json))
   end
 
-  # Returns the shipped profile identifiers (a copy of `PROFILES`).
-  def self.profiles : Array(String)
-    PROFILES.dup
+  # Decodes the blob's embedded profile record without opening a
+  # Pipeline (`ITB_Triple_Inspect`). No registry read, no primitive
+  # probe.
+  def self.inspect(blob : Bytes) : Profile
+    json = retry_once(JSON_CAP) do |buf, len_p|
+      LibItb.triple_inspect(blob.to_unsafe.as(Void*), LibC::SizeT.new(blob.size),
+        buf.to_unsafe.as(Void*), LibC::SizeT.new(buf.size), len_p)
+    end
+    Profile.from_json(String.new(json))
+  end
+
+  # Looks up a registered profile (shipped or `ITB.register`ed) by
+  # name (`ITB_Triple_Lookup`); an unknown name raises with
+  # `Status::UnknownProfile`.
+  def self.lookup(name : String) : Profile
+    json = retry_once(JSON_CAP) do |buf, len_p|
+      LibItb.triple_lookup(name, buf.to_unsafe.as(Void*), LibC::SizeT.new(buf.size), len_p)
+    end
+    Profile.from_json(String.new(json))
   end
 
   # Sets the Go runtime's soft heap limit in bytes and returns the
@@ -85,16 +83,12 @@ module ITB
     LibItb.set_gc_percent(pct)
   end
 
-  # Registers a user-defined Triple profile under `name` so subsequent
-  # `Pipeline.new` calls resolve it. The opts follow the
-  # register-profile grammar validated by Go (`mode`, `width`,
-  # `innerHash` / `innerHashes`, `keyBits`, `macName`, `outerCipher`,
-  # `parallaxPalette`, `parallaxSegmentSize`, `chunkSize`,
-  # `parallaxOn`, `wrapperOn`) — build them with `Opts#with_raw` plus
-  # the typed setters where key names coincide. A duplicate name
-  # fails with `Status::ProfileExists`.
-  def self.register_profile(name : String, opts : Opts) : Nil
-    check(LibItb.triple_register_profile(name, opts.build))
+  # Registers *profile* under *name* so subsequent `Pipeline.new` /
+  # `ITB.lookup` calls resolve it (`ITB_Triple_Register`). Every
+  # field rule is validated by Go; a duplicate name fails with
+  # `Status::ProfileExists`.
+  def self.register(name : String, profile : Profile) : Nil
+    check(LibItb.triple_register(name, profile.to_json))
   end
 
   # Two-phase read over the `(out, cap, *out_len)` C-string contract:

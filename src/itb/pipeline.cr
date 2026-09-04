@@ -1,72 +1,112 @@
 # GC-managed wrapper around the Triple Pipeline handle.
 
 module ITB
-  # A Triple Pipeline session plus its exported blob bytes.
+  # A Triple Pipeline session.
   #
-  # The blob carries the session bundle the receiver feeds to
-  # `Pipeline.new(profile, blob)`; `#rekey` refreshes it. Garbage
-  # collection frees the handle (libitb zeroes key material
-  # internally); `#free` releases it deterministically.
+  # `#save` exports the self-describing session blob the receiver
+  # feeds to `Pipeline.load` / `Pipeline.load_f`; `#rekey` refreshes
+  # it. Garbage collection frees the handle (libitb zeroes key
+  # material internally); `#free` releases it deterministically.
   #
   # Streaming-decrypt caveat: chunked Streaming AEAD verifies per
   # chunk, so plaintext of verified chunks is released before a later
   # chunk can fail authentication.
   class Pipeline
-    # Floor capacity for blob output buffers (Init / Rekey).
+    # Floor capacity for blob output buffers (Init / Save / Rekey).
     BLOB_CAP = 65536
-
-    # The exported session bundle bytes for the receiver side.
-    getter blob : Bytes
 
     @handle : Handle
 
-    # Constructs a Pipeline against the named profile.
-    #
-    # With `blob: nil` a fresh session is initialized (`ITB_Triple_Init`)
-    # and `#blob` carries the exported bundle. With a blob the session
-    # is reconstructed from it (`ITB_Triple_Open`); `masters` is nil to
-    # use the blob-embedded masters, or `{perm, wrap}` to override
-    # them. On a blob-buffer retry the Init re-runs and yields a fresh
-    # session (the undersized attempt is closed by libitb before
+    # Constructs a fresh Pipeline against the named profile
+    # (`ITB_Triple_Init`); the session blob is available through
+    # `#save`. On a blob-buffer retry the Init re-runs and yields a
+    # fresh session (the undersized attempt is closed by libitb before
     # returning).
-    def initialize(profile : String, blob : Bytes? = nil,
-                   opts : Opts = Opts.new,
-                   masters : Tuple(Bytes, Bytes)? = nil)
+    def initialize(profile : String, opts : Opts = Opts.new)
       opts_s = opts.build
       handle = Handle.zero
-      if blob.nil?
-        raise ArgumentError.new("masters override requires a blob (open path)") unless masters.nil?
-        @blob = ITB.retry_once(BLOB_CAP) do |buf, len_p|
-          LibItb.triple_init(profile, opts_s,
-            buf.to_unsafe.as(Void*), LibC::SizeT.new(buf.size), len_p,
-            pointerof(handle))
-        end
-      else
-        pm = Bytes.empty
-        wm = Bytes.empty
-        count = LibC::SizeT.zero
-        if m = masters
-          pm, wm = m
-          raise ArgumentError.new("master override slices must be non-empty") if pm.empty? || wm.empty?
-          count = LibC::SizeT.new(2)
-        end
-        rc = LibItb.triple_open(profile,
-          blob.to_unsafe.as(Void*), LibC::SizeT.new(blob.size),
-          opts_s,
-          pm.to_unsafe.as(Void*), LibC::SizeT.new(pm.size),
-          wm.to_unsafe.as(Void*), LibC::SizeT.new(wm.size),
-          count, pointerof(handle))
-        ITB.check(rc)
-        @blob = blob.dup
+      ITB.retry_once(BLOB_CAP) do |buf, len_p|
+        LibItb.triple_init(profile, opts_s,
+          buf.to_unsafe.as(Void*), LibC::SizeT.new(buf.size), len_p,
+          pointerof(handle))
       end
       @handle = handle
     end
 
-    # Rotates the parallax + wrapper masters and refreshes `#blob`.
-    # Must not run concurrently with cipher calls or open stream
-    # sessions on the same Pipeline.
-    def rekey(perm : Bytes, wrap : Bytes) : Nil
-      @blob = ITB.retry_once(Math.max(BLOB_CAP, @blob.size)) do |buf, len_p|
+    # :nodoc:
+    protected def initialize(@handle : Handle)
+    end
+
+    # Reconstructs a Pipeline from a blob produced by `#save` or
+    # `#rekey` (`ITB_Triple_Load`). The blob's embedded profile
+    # record is the sole structural source. `masters` is nil to use
+    # the blob-embedded masters, or `{perm, wrap}` to override them.
+    def self.load(blob : Bytes, masters : Tuple(Bytes, Bytes)? = nil) : Pipeline
+      pm, wm, count = masters_view(masters)
+      handle = Handle.zero
+      rc = LibItb.triple_load(
+        blob.to_unsafe.as(Void*), LibC::SizeT.new(blob.size),
+        pm.to_unsafe.as(Void*), LibC::SizeT.new(pm.size),
+        wm.to_unsafe.as(Void*), LibC::SizeT.new(wm.size),
+        count, pointerof(handle))
+      ITB.check(rc)
+      new(handle)
+    end
+
+    # `Pipeline.load` for a blob stored in a file
+    # (`ITB_Triple_LoadF`); the file is read inside the library. Same
+    # masters semantics.
+    def self.load_f(path : String, masters : Tuple(Bytes, Bytes)? = nil) : Pipeline
+      pm, wm, count = masters_view(masters)
+      handle = Handle.zero
+      rc = LibItb.triple_load_f(path,
+        pm.to_unsafe.as(Void*), LibC::SizeT.new(pm.size),
+        wm.to_unsafe.as(Void*), LibC::SizeT.new(wm.size),
+        count, pointerof(handle))
+      ITB.check(rc)
+      new(handle)
+    end
+
+    # Folds the optional master pair into the CAPI arity flag.
+    private def self.masters_view(masters : Tuple(Bytes, Bytes)?) : Tuple(Bytes, Bytes, LibC::SizeT)
+      if m = masters
+        pm, wm = m
+        raise ArgumentError.new("master override slices must be non-empty") if pm.empty? || wm.empty?
+        {pm, wm, LibC::SizeT.new(2)}
+      else
+        {Bytes.empty, Bytes.empty, LibC::SizeT.zero}
+      end
+    end
+
+    # The current self-describing session blob: the bytes `.new`
+    # produced, the bytes `.load` re-marshalled, or the bytes of the
+    # latest `#rekey`.
+    def save : Bytes
+      ITB.retry_once(BLOB_CAP) do |buf, len_p|
+        LibItb.triple_save(@handle,
+          buf.to_unsafe.as(Void*), LibC::SizeT.new(buf.size), len_p)
+      end
+    end
+
+    # Writes `#save` to *path* inside the library with mode 0600; the
+    # containing directory must exist.
+    def save_f(path : String) : Nil
+      ITB.check(LibItb.triple_save_f(@handle, path))
+    end
+
+    # Sets the worker cap for every subsequent cipher call. *n* is
+    # clamped, never rejected: `n <= 0` selects auto (CPU count),
+    # `n > 256` is treated as 256. Only the handle statuses raise.
+    def max_workers(n : Int32) : Nil
+      ITB.check(LibItb.triple_max_workers(@handle, n))
+    end
+
+    # Rotates the parallax + wrapper masters and returns the fresh
+    # session blob (also available through `#save`). Must not run
+    # concurrently with cipher calls or open stream sessions on the
+    # same Pipeline.
+    def rekey(perm : Bytes, wrap : Bytes) : Bytes
+      ITB.retry_once(BLOB_CAP) do |buf, len_p|
         LibItb.triple_rekey(@handle,
           perm.to_unsafe.as(Void*), LibC::SizeT.new(perm.size),
           wrap.to_unsafe.as(Void*), LibC::SizeT.new(wrap.size),
@@ -153,9 +193,9 @@ module ITB
     end
 
     def inspect(io : IO) : Nil
-      # The blob bytes are elided — session-bundle material does not
-      # belong in logs.
-      io << "ITB::Pipeline(blob_len=" << @blob.size << ")"
+      # Session-bundle material does not belong in logs; only the
+      # handle state is rendered.
+      io << "ITB::Pipeline(" << (@handle == 0 ? "freed" : "open") << ")"
     end
 
     def to_s(io : IO) : Nil

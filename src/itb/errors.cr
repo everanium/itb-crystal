@@ -18,9 +18,9 @@ module ITB
     SeedWidthMix     =  8
     BadMac           =  9
     MacFailure       = 10
-    Reserved11       = 11
-    Reserved12       = 12
-    Reserved13       = 13
+    BlobMalformedRecipe = 11
+    RecipePrimitiveUnknown = 12
+    UnknownProfile   = 13
     Reserved14       = 14
     Reserved15       = 15
     Reserved16       = 16
@@ -49,8 +49,11 @@ module ITB
       in .seed_width_mix?      then "seed width mismatch"
       in .bad_mac?             then "unknown MAC name or invalid MAC handle"
       in .mac_failure?         then "MAC verification failed"
-      in .reserved11?, .reserved12?, .reserved13?, .reserved14?,
-         .reserved15?, .reserved16?, .reserved17?
+      in .blob_malformed_recipe? then "blob profile record invalid"
+      in .recipe_primitive_unknown?
+        "blob profile record names a primitive absent from the local registries"
+      in .unknown_profile?     then "unknown profile name"
+      in .reserved14?, .reserved15?, .reserved16?, .reserved17?
         "reserved status"
       in .blob_mode_mismatch?  then "blob mode mismatch"
       in .blob_malformed?      then "malformed state blob"

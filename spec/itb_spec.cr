@@ -1,6 +1,7 @@
 # Integration spec suite for the ITB Crystal binding. Every case runs
 # against the live libitb shared library resolved at link time.
 
+require "file_utils"
 require "spec"
 require "../src/itb"
 
@@ -27,20 +28,7 @@ end
 describe ITB do
   it "reports the library and binding versions" do
     ITB.version.should_not be_empty
-    ITB::VERSION.should eq "0.3.5"
-  end
-
-  it "lists the hash registry in canonical order" do
-    expected = [
-      "areion256", "areion512", "blake2b256", "blake2b512",
-      "blake2s", "blake3", "aescmac", "siphash24", "chacha20",
-    ]
-    got = ITB.hashes
-    got.size.should eq expected.size
-    got.zip(expected) do |row, name|
-      row.name.should eq name
-      row.width.should be > 0
-    end
+    ITB::VERSION.should eq "0.4.1"
   end
 
   it "lists the shipped profiles" do
@@ -62,8 +50,8 @@ describe ITB do
 
   it "round-trips a Single Message (singlemsg-triple-mac-v1)" do
     sender = ITB::Pipeline.new("singlemsg-triple-mac-v1")
-    sender.blob.should_not be_empty
-    receiver = ITB::Pipeline.new("singlemsg-triple-mac-v1", sender.blob)
+    sender.save.should_not be_empty
+    receiver = ITB::Pipeline.load(sender.save)
     [1, 4 * 1024, 256 * 1024].each do |size|
       plain = payload(size, size.to_u64)
       wire = sender.encrypt_message(plain)
@@ -74,7 +62,7 @@ describe ITB do
 
   it "round-trips an incremental stream (streaming-noaead-triple-v1)" do
     sender = ITB::Pipeline.new("streaming-noaead-triple-v1")
-    receiver = ITB::Pipeline.new("streaming-noaead-triple-v1", sender.blob)
+    receiver = ITB::Pipeline.load(sender.save)
     plain = payload(96 * 1024, 7_u64)
 
     # Encrypt incrementally: 8 KiB writes, then end + drain.
@@ -111,17 +99,17 @@ describe ITB do
 
   it "round-trips a large plaintext (pattern P1, > 1 MiB)" do
     sender = ITB::Pipeline.new("singlemsg-triple-nomac-v1")
-    receiver = ITB::Pipeline.new("singlemsg-triple-nomac-v1", sender.blob)
+    receiver = ITB::Pipeline.load(sender.save)
     plain = payload(2 * 1024 * 1024 + 17, 3_u64)
     wire = sender.encrypt_message(plain)
     receiver.decrypt_message(wire).should eq plain
   end
 
-  it "maps an unknown profile to BadInput" do
-    ex = expect_status([ITB::Status::BadInput]) do
+  it "maps an unknown profile to UnknownProfile" do
+    ex = expect_status([ITB::Status::UnknownProfile]) do
       ITB::Pipeline.new("no-such-profile")
     end
-    ex.status_code.should eq ITB::Status::BadInput.value
+    ex.status_code.should eq ITB::Status::UnknownProfile.value
   end
 
   it "maps an unknown opts key to BadInput" do
@@ -135,7 +123,7 @@ describe ITB do
 
   it "fails authentication on a tampered wire" do
     sender = ITB::Pipeline.new("singlemsg-triple-mac-v1")
-    receiver = ITB::Pipeline.new("singlemsg-triple-mac-v1", sender.blob)
+    receiver = ITB::Pipeline.load(sender.save)
     wire = sender.encrypt_message(payload(4096, 21_u64))
     tampered = wire.dup
     tampered[tampered.size // 2] ^= 0xFF
@@ -155,31 +143,32 @@ describe ITB do
 
   it "refreshes the blob on rekey" do
     sender = ITB::Pipeline.new("singlemsg-triple-mac-v1")
-    blob_before = sender.blob
+    blob_before = sender.save
     sender.rekey(payload(32, 5_u64), payload(32, 6_u64))
-    sender.blob.should_not eq blob_before
+    sender.save.should_not eq blob_before
     # The refreshed blob reconstructs a working receiver.
-    receiver = ITB::Pipeline.new("singlemsg-triple-mac-v1", sender.blob)
+    receiver = ITB::Pipeline.load(sender.save)
     wire = sender.encrypt_message("post-rekey payload".to_slice)
     String.new(receiver.decrypt_message(wire)).should eq "post-rekey payload"
   end
 
   it "registers a custom profile and rejects a duplicate" do
-    opts = ITB::Opts.new
-      .with_raw("mode", "singlemsg-nomac")
-      .with_raw("width", "256")
-      .with_raw("innerHashes",
-        "blake3,blake2s,areion256,blake2b256,chacha20,blake3,blake2s,areion256")
-      .with_raw("keyBits", "1024")
-      .with_raw("parallaxOn", "false")
-      .with_raw("wrapperOn", "false")
-    ITB.register_profile("crystal-binding-test-mixed", opts)
+    profile = ITB::Profile.new(
+      mode: "singlemsg-nomac",
+      width: 256,
+      hashes: ["blake3", "blake2s", "areion256", "blake2b256",
+               "chacha20", "blake3", "blake2s", "areion256"],
+      key_bits: 1024,
+      parallax: false,
+      wrapper: false,
+    )
+    ITB.register("crystal-binding-test-mixed", profile)
     sender = ITB::Pipeline.new("crystal-binding-test-mixed")
-    receiver = ITB::Pipeline.new("crystal-binding-test-mixed", sender.blob)
+    receiver = ITB::Pipeline.load(sender.save)
     wire = sender.encrypt_message("custom profile".to_slice)
     String.new(receiver.decrypt_message(wire)).should eq "custom profile"
     expect_status([ITB::Status::ProfileExists]) do
-      ITB.register_profile("crystal-binding-test-mixed", opts)
+      ITB.register("crystal-binding-test-mixed", profile)
     end
   end
 
@@ -207,8 +196,7 @@ describe ITB do
       "areion512", "blake2b512", "areion512", "blake2b512",
     ])
     sender = ITB::Pipeline.new("singlemsg-triple-mac-v1", opts: override)
-    receiver = ITB::Pipeline.new(
-      "singlemsg-triple-mac-v1", sender.blob, override)
+    receiver = ITB::Pipeline.load(sender.save)
     plain = payload(2048, 43_u64)
     receiver.decrypt_message(sender.encrypt_message(plain)).should eq plain
   end
@@ -225,5 +213,93 @@ describe ITB do
     sess.write("still alive after parent went out of scope".to_slice)
     sess.drain_all.should_not be_empty
     sess.free
+  end
+
+  it "round-trips save -> load" do
+    plain = payload(2048, 71_u64)
+    sender = ITB::Pipeline.new("singlemsg-triple-mac-v1")
+    blob = sender.save
+    blob.should_not be_empty
+    sender.save.should eq blob
+    receiver = ITB::Pipeline.load(blob)
+    receiver.save.should eq blob
+    receiver.decrypt_message(sender.encrypt_message(plain)).should eq plain
+  end
+
+  it "round-trips save_f -> load_f" do
+    plain = payload(2048, 72_u64)
+    dir = File.tempname("itb-crystal-", "")
+    Dir.mkdir(dir)
+    begin
+      file = File.join(dir, "session.blob")
+      sender = ITB::Pipeline.new("streaming-aead-triple-mac-v1")
+      sender.save_f(file)
+      File.read(file).to_slice.should eq sender.save
+      receiver = ITB::Pipeline.load_f(file)
+      receiver.decrypt_stream_one_shot(sender.encrypt_stream_one_shot(plain)).should eq plain
+    ensure
+      FileUtils.rm_rf(dir)
+    end
+  end
+
+  it "loads with a master override after rekey" do
+    plain = payload(2048, 73_u64)
+    perm = Bytes.new(32, 0x33_u8)
+    wrap = Bytes.new(32, 0x44_u8)
+    sender = ITB::Pipeline.new("singlemsg-triple-mac-v1")
+    blob = sender.save
+    rotated = sender.rekey(perm, wrap)
+    rotated.should_not eq blob
+    sender.save.should eq rotated
+    receiver = ITB::Pipeline.load(blob, {perm, wrap})
+    receiver.decrypt_message(sender.encrypt_message(plain)).should eq plain
+  end
+
+  it "inspects the embedded record and matches the registry" do
+    pipe = ITB::Pipeline.new("streaming-aead-triple-mac-v1")
+    prof = ITB.inspect(pipe.save)
+    prof.name.should eq "streaming-aead-triple-mac-v1"
+    prof.mode.should eq "streaming-aead"
+    prof.width.should eq 512
+    ITB.lookup("streaming-aead-triple-mac-v1").should eq prof
+  end
+
+  it "maps an unknown lookup name to UnknownProfile" do
+    expect_status([ITB::Status::UnknownProfile]) do
+      ITB.lookup("no-such-profile")
+    end
+  end
+
+  it "registers a copy of a shipped profile" do
+    plain = payload(2048, 74_u64)
+    copy = ITB.lookup("singlemsg-triple-nomac-v1")
+    copy.name = ""
+    ITB.register("crystal-binding-test-copy", copy)
+    back = ITB.lookup("crystal-binding-test-copy")
+    back.name.should eq "crystal-binding-test-copy"
+    back.mode.should eq copy.mode
+    ITB.profiles.should contain("crystal-binding-test-copy")
+    sender = ITB::Pipeline.new("crystal-binding-test-copy")
+    receiver = ITB::Pipeline.load(sender.save)
+    receiver.decrypt_message(sender.encrypt_message(plain)).should eq plain
+  end
+
+  it "round-trips the profile JSON codec" do
+    p = ITB.lookup("streaming-aead-triple-mac-mixed-v1")
+    p.hashes.size.should eq 8
+    ITB::Profile.from_json(p.to_json).should eq p
+  end
+
+  it "clamps max_workers and reports TripleClosed on a closed handle" do
+    plain = payload(2048, 75_u64)
+    pipe = ITB::Pipeline.new("singlemsg-triple-mac-v1", opts: ITB::Opts.new.with_max_workers(-1))
+    pipe.max_workers(2)
+    pipe.max_workers(-1)
+    pipe.max_workers(1000)
+    pipe.decrypt_message(pipe.encrypt_message(plain)).should eq plain
+    pipe.close
+    expect_status([ITB::Status::TripleClosed]) do
+      pipe.max_workers(2)
+    end
   end
 end

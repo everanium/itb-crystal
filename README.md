@@ -12,11 +12,12 @@ bindings — no external shard dependencies, no C glue code. The
 compiled binaries link `libitb.so` directly, and every hash-name /
 MAC-name / cipher-name / profile-name is an opaque string passed
 through to Go for validation — the binding carries no ITB construction
-logic. The public surface is the `ITB::Pipeline` class (init / open /
-rekey / close, Single Message encrypt / decrypt, whole-buffer and
-incremental stream sessions), the fluent `ITB::Opts` query-string
-builder, `ITB.register_profile`, the registry roster helpers, and the
-Go runtime knobs.
+logic. The public surface is the `ITB::Pipeline` class (init / load
+/ save / rekey / close, Single Message encrypt / decrypt,
+whole-buffer and incremental stream sessions), the fluent
+`ITB::Opts` query-string builder, the `ITB::Profile` record with the
+registry entries `ITB.register` / `ITB.lookup` / `ITB.profiles` and
+the blob reader `ITB.inspect`, and the Go runtime knobs.
 
 ## Prerequisites (Arch Linux)
 
@@ -68,17 +69,17 @@ so executables run without `LD_LIBRARY_PATH`.
 ```crystal
 require "itb"
 
-# Single Message: sender initializes a session, receiver opens it
+# Single Message: sender initializes a session, receiver loads it
 # from the exported blob.
 sender = ITB::Pipeline.new("singlemsg-triple-mac-v1")
-receiver = ITB::Pipeline.new("singlemsg-triple-mac-v1", sender.blob)
+receiver = ITB::Pipeline.load(sender.save)
 
 wire = sender.encrypt_message("attack at dawn".to_slice)
 plain = receiver.decrypt_message(wire) # => "attack at dawn".to_slice
 
 # Streaming AEAD: incremental sessions over a streaming profile.
 s = ITB::Pipeline.new("streaming-aead-triple-mac-v1")
-r = ITB::Pipeline.new("streaming-aead-triple-mac-v1", s.blob)
+r = ITB::Pipeline.load(s.save)
 
 enc = s.encrypt_stream
 enc.write(chunk1)
@@ -102,33 +103,41 @@ opts = ITB::Opts.new
   .with_inner_hash("areion512")
 pipe = ITB::Pipeline.new("singlemsg-triple-nomac-v1", opts: opts)
 
-# Master rotation refreshes the exported blob.
-pipe.rekey(perm_master, wrap_master)
+# Master rotation returns the refreshed blob.
+rotated = pipe.rekey(perm_master, wrap_master)
 
 # Registry roster.
 ITB.version  # => libitb version string
-ITB.hashes   # => [ITB::HashInfo(name, width), ...] in canonical order
-ITB.profiles # => shipped profile identifiers
+ITB.profiles # => sorted registered profile names
 ```
 
-`ITB::Opts` overrides the profile default per call (chunk size,
-outer cipher, parallax on/off, wrapper on/off, MAC name, palette);
-every setter returns the same builder for fluent chaining:
+Persist the session to disk and reopen it later:
+
+```crystal
+sender.save_f("/path/session.blob")
+receiver = ITB::Pipeline.load_f("/path/session.blob")
+```
+
+`ITB::Opts` overrides the profile default at `Pipeline.new` (chunk
+size, outer cipher, parallax on/off, wrapper on/off, MAC name,
+palette, `max_workers`); every setter returns the same builder for
+fluent chaining. The blob the receiver loads carries the resolved
+shape, so `load` takes no opts:
 
 ```crystal
 opts = ITB::Opts.new.with_chunk_size(65536).with_wrapper(false)
 sender = ITB::Pipeline.new("singlemsg-triple-mac-v1", opts: opts)
-receiver = ITB::Pipeline.new("singlemsg-triple-mac-v1", sender.blob, opts: opts)
+receiver = ITB::Pipeline.load(sender.save)
 ```
 
 `Pipeline#rekey` rotates the parallax + wrapper masters mid-session
 (the eight ITB seeds and MAC key are fixed for the session lifetime
-by design); the receiver picks up the new masters through a fresh
-`sender.blob` handshake:
+by design) and returns the refreshed blob; the receiver picks up
+the new masters through a fresh `save` / `load` handshake:
 
 ```crystal
-sender.rekey(Bytes.new(32, 0x11_u8), Bytes.new(32, 0x22_u8))
-receiver = ITB::Pipeline.new("singlemsg-triple-mac-v1", sender.blob)
+rotated = sender.rekey(Bytes.new(32, 0x11_u8), Bytes.new(32, 0x22_u8))
+receiver = ITB::Pipeline.load(rotated)
 ```
 
 Every fallible call raises `ITB::Error`, which carries `status`
@@ -138,6 +147,53 @@ releases Go-side handles; call `Pipeline#free` / session `#free` for
 deterministic release. A stream session holds a reference to its
 parent Pipeline, so the parent cannot be collected while the session
 is reachable.
+
+## Persisting sessions
+
+The blob `save` returns is self-describing: it carries the profile
+record (the resolved pipeline shape) alongside the key material, so
+a receiver reconstructs the session from the blob alone.
+
+```crystal
+blob = sender.save                              # current session blob
+sender.save_f("/path/session.blob")             # same bytes, written by the library (mode 0600)
+a = ITB::Pipeline.load(blob)                    # reopen from bytes
+b = ITB::Pipeline.load_f("/path/session.blob")  # reopen from a file
+c = ITB::Pipeline.load(blob, {perm, wrap})      # reopen with a master override
+p = ITB.inspect(blob)                           # ITB::Profile; no Pipeline opened
+```
+
+Load works for blobs generated with shipped primitives (every entry
+in the shipped catalogue). Blobs generated by Go programs that use
+`hashes.Register` or `macs.Register` to install custom primitives
+cannot be loaded through this binding — the receiver must use the Go
+library directly and register the same custom primitive under the
+same name before opening. Attempting to load such a blob through
+this binding surfaces `ITB::Status::RecipePrimitiveUnknown`. A blob from an earlier wrap-layer
+version surfaces `ITB::Status::BadInput`; a record that fails the profile field
+rules surfaces `ITB::Status::BlobMalformedRecipe`.
+
+The profile registry is reachable through the same `ITB::Profile`
+record:
+
+```crystal
+names = ITB.profiles                            # sorted registry names
+shipped = ITB.lookup("singlemsg-triple-nomac-v1")
+custom = ITB::Profile.new(
+  mode: "singlemsg-nomac", width: 512, hash: "areion512", key_bits: 1024,
+  wrapper: false, parallax: false,
+)
+ITB.register("my-profile", custom)              # validated by Go; duplicate -> ProfileExists
+```
+
+`ITB::Profile` is a plain record plus JSON codec — no validation happens
+on the binding side. `ITB.inspect` / `ITB.lookup` return it; `ITB.register`
+accepts it; an unknown name at `Pipeline.new` / `ITB.lookup` surfaces `ITB::Status::UnknownProfile`.
+
+Runtime tuning: `pipe.max_workers(n)` sets the worker cap for every
+subsequent cipher call (`n <= 0` selects auto, `n > 256` is clamped
+to 256); the receiver may pick its own worker cap after `load` — the
+cap is per-machine and never written to the blob.
 
 ## Memory
 
@@ -160,12 +216,12 @@ ITB.set_gc_percent(20)              # aggressive GC
 ./bindings/crystal/run_tests.sh
 ```
 
-Runs `crystal spec`: version and roster checks (canonical hash order,
-shipped profiles), Single Message and incremental-stream round trips
+Runs `crystal spec`: version and profile-roster checks, Single
+Message and incremental-stream round trips
 (including pathological 17-byte feed / 23-byte drain batches), a
 large-plaintext round trip past 1 MiB, error mapping (unknown
 profile, unknown opts key, tampered wire, closed pipeline), rekey,
-custom-profile registration, opts encoding, and the stream-session
+session persistence (save / load, saveF / loadF, inspect, lookup / profiles / register, maxWorkers), opts encoding, and the stream-session
 parent-pin.
 
 ## Benchmarking
@@ -183,11 +239,21 @@ off, No MAC profiles, 5 s wall-clock per case; see
 `ITB_KEY_BITS`, `ITB_NONCE_BITS`, `ITB_WITH_PARALLAX`,
 `ITB_WITH_WRAPPER`, `ITB_PROFILE`, `ITB_BENCH_MIN_SEC`.
 
+## Related — `itb3` CLI
+
+The Go core ships an openssl-style CLI utility
+[`itb3`](../../cmd/itb3/) that generates session blobs on disk
+(`itb3 genblob <mode> <hash> -o blob.json`); this binding reopens
+such blobs via `ITB::Pipeline.load_f`. `itb3` also encrypts /
+decrypts payloads directly on disk (`-i` / `-o`) or through stdin /
+stdout, rotates outer masters, and inspects stored blobs. See
+[`cmd/itb3/README.md`](../../cmd/itb3/README.md) for the full
+subcommand reference.
+
 ## eitb utility
 
 ```bash
 ./bindings/crystal/eitb/eitb version
-./bindings/crystal/eitb/eitb hashes
 ./bindings/crystal/eitb/eitb profiles
 ./bindings/crystal/eitb/eitb encrypt <profile> <in-file> <out-file>
 ./bindings/crystal/eitb/eitb decrypt <profile> <blob-hex> <in-file> <out-file>
@@ -215,6 +281,3 @@ back to `decrypt` on the receiving side.
 - **Triple surface only.** The binding exposes the Triple Pipeline
   facade; the Low-Level configuration surface stays Go-native and is
   not exported here.
-- **Profile roster is pinned.** The C ABI exposes no profile
-  enumeration; `ITB.profiles` returns the shipped identifiers pinned
-  in the binding and does not include profiles registered at runtime.

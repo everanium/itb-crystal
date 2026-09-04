@@ -20,12 +20,9 @@ end
 
 @[Link(ldflags: "`#{__DIR__}/libitb_flags.sh`")]
 lib LibItb
-  # ── diagnostics / registry iteration ─────────────────────────────
+  # ── diagnostics ──────────────────────────────────────────────────
   fun version = ITB_Version(out : LibC::Char*, cap : LibC::SizeT, out_len : LibC::SizeT*) : LibC::Int
   fun last_error = ITB_LastError(out : LibC::Char*, cap : LibC::SizeT, out_len : LibC::SizeT*) : LibC::Int
-  fun hash_count = ITB_HashCount : LibC::Int
-  fun hash_name = ITB_HashName(i : LibC::Int, out : LibC::Char*, cap : LibC::SizeT, out_len : LibC::SizeT*) : LibC::Int
-  fun hash_width = ITB_HashWidth(i : LibC::Int) : LibC::Int
 
   # ── Go runtime knobs ─────────────────────────────────────────────
   fun set_memory_limit = ITB_SetMemoryLimit(limit : Int64) : Int64
@@ -35,19 +32,34 @@ lib LibItb
   fun triple_init = ITB_Triple_Init(profile : LibC::Char*, opts : LibC::Char*,
                                     blob_out : Void*, blob_cap : LibC::SizeT, blob_len : LibC::SizeT*,
                                     out_handle : LibC::SizeT*) : LibC::Int
-  fun triple_open = ITB_Triple_Open(profile : LibC::Char*, blob : Void*, blob_len : LibC::SizeT,
-                                    opts : LibC::Char*,
+  fun triple_load = ITB_Triple_Load(blob : Void*, blob_len : LibC::SizeT,
                                     perm_master : Void*, perm_master_len : LibC::SizeT,
                                     wrap_master : Void*, wrap_master_len : LibC::SizeT,
                                     masters_count : LibC::SizeT,
                                     out_handle : LibC::SizeT*) : LibC::Int
+  fun triple_load_f = ITB_Triple_LoadF(path : LibC::Char*,
+                                       perm_master : Void*, perm_master_len : LibC::SizeT,
+                                       wrap_master : Void*, wrap_master_len : LibC::SizeT,
+                                       masters_count : LibC::SizeT,
+                                       out_handle : LibC::SizeT*) : LibC::Int
+  fun triple_save = ITB_Triple_Save(handle : LibC::SizeT,
+                                    blob_out : Void*, blob_cap : LibC::SizeT, blob_len : LibC::SizeT*) : LibC::Int
+  fun triple_save_f = ITB_Triple_SaveF(handle : LibC::SizeT, path : LibC::Char*) : LibC::Int
+  fun triple_inspect = ITB_Triple_Inspect(blob : Void*, blob_len : LibC::SizeT,
+                                          json_out : Void*, json_cap : LibC::SizeT, json_len : LibC::SizeT*) : LibC::Int
+  fun triple_max_workers = ITB_Triple_MaxWorkers(handle : LibC::SizeT, n : LibC::Int) : LibC::Int
   fun triple_rekey = ITB_Triple_Rekey(handle : LibC::SizeT,
                                       perm_master : Void*, perm_master_len : LibC::SizeT,
                                       wrap_master : Void*, wrap_master_len : LibC::SizeT,
                                       blob_out : Void*, blob_cap : LibC::SizeT, blob_len : LibC::SizeT*) : LibC::Int
   fun triple_close = ITB_Triple_Close(handle : LibC::SizeT) : LibC::Int
   fun triple_free = ITB_Triple_Free(handle : LibC::SizeT) : LibC::Int
-  fun triple_register_profile = ITB_Triple_RegisterProfile(name : LibC::Char*, opts : LibC::Char*) : LibC::Int
+
+  # ── profile registry ─────────────────────────────────────────────
+  fun triple_register = ITB_Triple_Register(name : LibC::Char*, profile_json : LibC::Char*) : LibC::Int
+  fun triple_lookup = ITB_Triple_Lookup(name : LibC::Char*,
+                                        json_out : Void*, json_cap : LibC::SizeT, json_len : LibC::SizeT*) : LibC::Int
+  fun triple_profiles = ITB_Triple_Profiles(json_out : Void*, json_cap : LibC::SizeT, json_len : LibC::SizeT*) : LibC::Int
 
   # ── buffer-in / buffer-out cipher entries ────────────────────────
   fun triple_encrypt_message = ITB_Triple_EncryptMessage(handle : LibC::SizeT, src : Void*, src_len : LibC::SizeT,

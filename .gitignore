@@ -1,0 +1,10 @@
+# Compiled binaries and build caches
+bin/
+.crystal/
+lib/
+.shards/
+shard.lock
+
+# Scratch outputs
+*.wire
+*.plain

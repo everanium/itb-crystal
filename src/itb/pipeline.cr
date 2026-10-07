@@ -26,9 +26,9 @@ module ITB
       opts_s = opts.build
       handle = Handle.zero
       ITB.retry_once(BLOB_CAP) do |buf, len_p|
-        LibItb3.triple_init(profile, opts_s,
+        ITB.blocking(->{ LibItb3.triple_init(profile, opts_s,
           buf.to_unsafe.as(Void*), LibC::SizeT.new(buf.size), len_p,
-          pointerof(handle))
+          pointerof(handle)) })
       end
       @handle = handle
     end
@@ -44,11 +44,11 @@ module ITB
     def self.load(blob : Bytes, masters : Tuple(Bytes, Bytes)? = nil) : Pipeline
       pm, wm, count = masters_view(masters)
       handle = Handle.zero
-      rc = LibItb3.triple_load(
+      rc = ITB.blocking(->{ LibItb3.triple_load(
         blob.to_unsafe.as(Void*), LibC::SizeT.new(blob.size),
         pm.to_unsafe.as(Void*), LibC::SizeT.new(pm.size),
         wm.to_unsafe.as(Void*), LibC::SizeT.new(wm.size),
-        count, pointerof(handle))
+        count, pointerof(handle)) })
       ITB.check(rc)
       new(handle)
     end
@@ -59,10 +59,10 @@ module ITB
     def self.load_f(path : String, masters : Tuple(Bytes, Bytes)? = nil) : Pipeline
       pm, wm, count = masters_view(masters)
       handle = Handle.zero
-      rc = LibItb3.triple_load_f(path,
+      rc = ITB.blocking(->{ LibItb3.triple_load_f(path,
         pm.to_unsafe.as(Void*), LibC::SizeT.new(pm.size),
         wm.to_unsafe.as(Void*), LibC::SizeT.new(wm.size),
-        count, pointerof(handle))
+        count, pointerof(handle)) })
       ITB.check(rc)
       new(handle)
     end
@@ -83,22 +83,22 @@ module ITB
     # latest `#rekey`.
     def save : Bytes
       ITB.retry_once(BLOB_CAP) do |buf, len_p|
-        LibItb3.triple_save(@handle,
-          buf.to_unsafe.as(Void*), LibC::SizeT.new(buf.size), len_p)
+        ITB.blocking(->{ LibItb3.triple_save(@handle,
+          buf.to_unsafe.as(Void*), LibC::SizeT.new(buf.size), len_p) })
       end
     end
 
     # Writes `#save` to *path* inside the library with mode 0600; the
     # containing directory must exist.
     def save_f(path : String) : Nil
-      ITB.check(LibItb3.triple_save_f(@handle, path))
+      ITB.check(ITB.blocking(->{ LibItb3.triple_save_f(@handle, path) }))
     end
 
     # Sets the worker cap for every subsequent cipher call. *n* is
     # clamped, never rejected: `n <= 0` selects auto (CPU count),
     # `n > 256` is treated as 256. Only the handle statuses raise.
     def max_workers(n : Int32) : Nil
-      ITB.check(LibItb3.triple_max_workers(@handle, n))
+      ITB.check(ITB.blocking(->{ LibItb3.triple_max_workers(@handle, n) }))
     end
 
     # Rotates the parallax + wrapper masters and returns the fresh
@@ -107,10 +107,10 @@ module ITB
     # same Pipeline.
     def rekey(perm : Bytes, wrap : Bytes) : Bytes
       ITB.retry_once(BLOB_CAP) do |buf, len_p|
-        LibItb3.triple_rekey(@handle,
+        ITB.blocking(->{ LibItb3.triple_rekey(@handle,
           perm.to_unsafe.as(Void*), LibC::SizeT.new(perm.size),
           wrap.to_unsafe.as(Void*), LibC::SizeT.new(wrap.size),
-          buf.to_unsafe.as(Void*), LibC::SizeT.new(buf.size), len_p)
+          buf.to_unsafe.as(Void*), LibC::SizeT.new(buf.size), len_p) })
       end
     end
 
@@ -118,15 +118,15 @@ module ITB
     # Idempotent; subsequent cipher calls raise with
     # `Status::TripleClosed`.
     def close : Nil
-      ITB.check(LibItb3.triple_close(@handle))
+      ITB.check(ITB.blocking(->{ LibItb3.triple_close(@handle) }))
     end
 
     # Single Message encrypt: one call, one self-contained wire.
     def encrypt_message(plain : Bytes) : Bytes
       cipher(plain) do |src, buf, len_p|
-        LibItb3.triple_encrypt_message(@handle,
+        ITB.blocking(->{ LibItb3.triple_encrypt_message(@handle,
           src.to_unsafe.as(Void*), LibC::SizeT.new(src.size),
-          buf.to_unsafe.as(Void*), LibC::SizeT.new(buf.size), len_p)
+          buf.to_unsafe.as(Void*), LibC::SizeT.new(buf.size), len_p) })
       end
     end
 
@@ -138,9 +138,9 @@ module ITB
     # Receive-side counterpart of `#encrypt_message`.
     def decrypt_message(wire : Bytes) : Bytes
       cipher(wire) do |src, buf, len_p|
-        LibItb3.triple_decrypt_message(@handle,
+        ITB.blocking(->{ LibItb3.triple_decrypt_message(@handle,
           src.to_unsafe.as(Void*), LibC::SizeT.new(src.size),
-          buf.to_unsafe.as(Void*), LibC::SizeT.new(buf.size), len_p)
+          buf.to_unsafe.as(Void*), LibC::SizeT.new(buf.size), len_p) })
       end
     end
 
@@ -148,18 +148,18 @@ module ITB
     # in memory. For bounded-memory streaming use `#encrypt_stream`.
     def encrypt_stream_one_shot(plain : Bytes) : Bytes
       cipher(plain) do |src, buf, len_p|
-        LibItb3.triple_encrypt_stream(@handle,
+        ITB.blocking(->{ LibItb3.triple_encrypt_stream(@handle,
           src.to_unsafe.as(Void*), LibC::SizeT.new(src.size),
-          buf.to_unsafe.as(Void*), LibC::SizeT.new(buf.size), len_p)
+          buf.to_unsafe.as(Void*), LibC::SizeT.new(buf.size), len_p) })
       end
     end
 
     # Receive-side counterpart of `#encrypt_stream_one_shot`.
     def decrypt_stream_one_shot(wire : Bytes) : Bytes
       cipher(wire) do |src, buf, len_p|
-        LibItb3.triple_decrypt_stream(@handle,
+        ITB.blocking(->{ LibItb3.triple_decrypt_stream(@handle,
           src.to_unsafe.as(Void*), LibC::SizeT.new(src.size),
-          buf.to_unsafe.as(Void*), LibC::SizeT.new(buf.size), len_p)
+          buf.to_unsafe.as(Void*), LibC::SizeT.new(buf.size), len_p) })
       end
     end
 
@@ -177,7 +177,7 @@ module ITB
     # Safe from any state; idempotent.
     def free : Nil
       return if @handle == 0
-      LibItb3.triple_free(@handle)
+      ITB.blocking(->{ LibItb3.triple_free(@handle) })
       @handle = Handle.zero
     end
 

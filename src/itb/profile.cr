@@ -20,12 +20,13 @@ module ITB
   # nothing or exactly eight slot names in the order `[noise, lock,
   # data1, data2, data3, start1, start2, start3]`.
   #
-  # `nonce_bits` and `barrier_fill` are inspection-only. They are not
-  # part of the profile recipe: `ITB.inspect` reads them from the
-  # blob's runtime globals snapshot, while `ITB.lookup` leaves both
-  # nil because the registry entry never carries them. libitb3 rejects
-  # a `ITB.register` payload that carries either key, so clear both
-  # before registering an inspected record.
+  # `nonce_bits`, `barrier_fill` and `container_mode` are
+  # inspection-only. They are not part of the profile recipe:
+  # `ITB.inspect` reads them from the blob's inner snapshot, while
+  # `ITB.lookup` leaves them nil because the registry entry never
+  # carries them. libitb3 rejects a `ITB.register` payload that carries
+  # any of the keys, so clear them before registering an inspected
+  # record.
   class Profile
     # Registry handle (`name`); empty on an anonymous record.
     property name : String
@@ -48,6 +49,12 @@ module ITB
     # DRBG barrier fill margin (`barrier_fill`), read from the blob's
     # runtime globals. Same inspection-only lifecycle as `#nonce_bits`.
     property barrier_fill : Int32?
+    # Container floor sizing mode (`container_mode`), read from the
+    # blob's inner mode field: 1 per-region, 2 per-container. Same
+    # inspection-only lifecycle as `#nonce_bits`.
+    property container_mode : Int32?
+    # DRBG fill primitive name (`drbg`); empty for the auto tier.
+    property drbg : String
     # MAC name (`mac`); empty on a No MAC profile.
     property mac : String
     # Tag stub size (`tagstub`); 0 when absent.
@@ -69,7 +76,8 @@ module ITB
                    @hashes = [] of String, @key_bits = 0, @mac = "",
                    @tag_stub = 0, @chunk = 0, @wrapper = false, @outer = "",
                    @parallax = false, @palette = [] of String, @segment = 0,
-                   @nonce_bits = nil, @barrier_fill = nil)
+                   @nonce_bits = nil, @barrier_fill = nil,
+                   @container_mode = nil, @drbg = "")
     end
 
     # Renders the record as the wire JSON object.
@@ -88,6 +96,10 @@ module ITB
           if bf = @barrier_fill
             j.field "barrier_fill", bf
           end
+          if cm = @container_mode
+            j.field "container_mode", cm
+          end
+          j.field "drbg", @drbg unless @drbg.empty?
           j.field "mac", @mac unless @mac.empty?
           j.field "tagstub", @tag_stub unless @tag_stub == 0
           j.field "chunk", @chunk unless @chunk == 0
@@ -113,6 +125,8 @@ module ITB
         key_bits: m["keybits"]?.try(&.as_i) || 0,
         nonce_bits: m["nonce_bits"]?.try(&.as_i?),
         barrier_fill: m["barrier_fill"]?.try(&.as_i?),
+        container_mode: m["container_mode"]?.try(&.as_i?),
+        drbg: m["drbg"]?.try(&.as_s) || "",
         mac: m["mac"]?.try(&.as_s) || "",
         tag_stub: m["tagstub"]?.try(&.as_i) || 0,
         chunk: m["chunk"]?.try(&.as_i) || 0,

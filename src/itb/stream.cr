@@ -23,9 +23,9 @@ module ITB
     protected def initialize(@parent : Pipeline, encrypt : Bool)
       handle = Handle.zero
       rc = if encrypt
-             LibItb3.triple_encrypt_stream_begin(@parent.handle, pointerof(handle))
+             ITB.blocking(->{ LibItb3.triple_encrypt_stream_begin(@parent.handle, pointerof(handle)) })
            else
-             LibItb3.triple_decrypt_stream_begin(@parent.handle, pointerof(handle))
+             ITB.blocking(->{ LibItb3.triple_decrypt_stream_begin(@parent.handle, pointerof(handle)) })
            end
       ITB.check(rc)
       @handle = handle
@@ -34,8 +34,8 @@ module ITB
     # Feeds `src` into the session. Blocks until the cipher chain
     # accepts the bytes; errors are sticky.
     def write(src : Bytes) : Nil
-      ITB.check(LibItb3.triple_stream_write(@handle,
-        src.to_unsafe.as(Void*), LibC::SizeT.new(src.size)))
+      ITB.check(ITB.blocking(->{ LibItb3.triple_stream_write(@handle,
+        src.to_unsafe.as(Void*), LibC::SizeT.new(src.size)) }))
     end
 
     # :ditto:
@@ -46,7 +46,7 @@ module ITB
     # Signals end-of-input. Idempotent; `#write` after `#end_stream`
     # fails with `Status::BadInput`.
     def end_stream : Nil
-      ITB.check(LibItb3.triple_stream_end(@handle))
+      ITB.check(ITB.blocking(->{ LibItb3.triple_stream_end(@handle) }))
       @ended = true
     end
 
@@ -58,9 +58,9 @@ module ITB
     def read_into(buf : Bytes) : Tuple(Int32, Bool)
       n = LibC::SizeT.zero
       fin = LibC::Int.zero
-      ITB.check(LibItb3.triple_stream_read(@handle,
+      ITB.check(ITB.blocking(->{ LibItb3.triple_stream_read(@handle,
         buf.to_unsafe.as(Void*), LibC::SizeT.new(buf.size),
-        pointerof(n), pointerof(fin)))
+        pointerof(n), pointerof(fin)) }))
       {n.to_i32, fin != 0}
     end
 
@@ -90,7 +90,7 @@ module ITB
     # deterministically. Safe from any state; idempotent.
     def free : Nil
       return if @handle == 0
-      LibItb3.triple_stream_free(@handle)
+      ITB.blocking(->{ LibItb3.triple_stream_free(@handle) })
       @handle = Handle.zero
     end
 

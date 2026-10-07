@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
-# build.sh -- one-step build for the Crystal binding: (re)builds
-# libitb3.so if absent (or when ITB_REBUILD_LIBITB3=1), then compiles
-# the eitb CLI binary. Prerequisites (Go, Crystal) must be installed
-# separately; see README.md "Prerequisites".
+# One-step build for the Crystal binding: (re)builds libitb3.so if
+# absent (or when ITB_REBUILD_LIBITB3=1), then compiles the eitb CLI
+# binary. Prerequisites (Go, Crystal) must be installed separately;
+# see README.md "Prerequisites".
 #
 # Every artefact this binding owns is removed first, so nothing the
 # build produces can be a leftover from an earlier invocation.
@@ -43,6 +43,7 @@ CLEAN_TARGETS=(
     .crystal              # compiler cache
     lib                   # installed shard tree
     .shards               # shard metadata tree
+    loop/loop             # loop stress harness binary
 )
 
 clean_artefacts() {
@@ -89,5 +90,8 @@ fi
 echo "==> compiling the eitb CLI (crystal build)"
 mkdir -p bin
 crystal build -o bin/eitb eitb/itb_eitb.cr
+
+echo "==> compiling the loop stress harness (crystal build)"
+crystal build -o loop/loop loop/main.cr
 
 echo "==> ready: ./run_tests.sh"

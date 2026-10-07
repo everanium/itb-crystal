@@ -1,8 +1,8 @@
 #!/bin/sh
 #
-# libitb3_flags.sh -- emits the linker flags that resolve libitb3 for the
-# Crystal binding. Executed by the compiler through the backtick form
-# in the @[Link(ldflags: ...)] annotation of src/itb/ffi_bridge.cr.
+# Emits the linker flags that resolve libitb3 for the Crystal binding.
+# Executed by the compiler through the backtick form in the
+# @[Link(ldflags: ...)] annotation of src/itb/ffi_bridge.cr.
 #
 # Search order:
 #   1. ITB_LIBITB3_PATH environment variable (path to the shared

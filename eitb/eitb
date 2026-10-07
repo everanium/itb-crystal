@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# eitb -- launcher for the eitb CLI. Builds the Crystal binary on
-# first use (or after a clean), then forwards every argument to it.
+# Launcher for the eitb CLI. Builds the Crystal binary on first use
+# (or after a clean), then forwards every argument to it.
 
 set -eu
 set -o pipefail

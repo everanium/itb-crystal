@@ -81,6 +81,10 @@ module ITB
       with_raw("outerCipher", name)
     end
 
+    def with_drbg(name : String) : self
+      with_raw("drbg", name)
+    end
+
     # Comma-joins the palette names (`parallaxPalette`).
     def with_parallax_palette(names : Enumerable(String)) : self
       with_raw("parallaxPalette", names.join(","))

@@ -31,6 +31,10 @@ describe ITB do
     ITB::VERSION.should eq "0.5.1"
   end
 
+  it "reports the auto DRBG tier as a fill cipher" do
+    ["aes-256-ctr", "chacha20"].should contain(ITB.drbg_auto_tier)
+  end
+
   it "lists the shipped profiles" do
     got = ITB.profiles
     got.should_not be_empty
@@ -266,6 +270,7 @@ describe ITB do
     recipe = prof.dup
     recipe.nonce_bits = nil
     recipe.barrier_fill = nil
+    recipe.container_mode = nil
     ITB.lookup("streaming-aead-triple-mac-v1").should eq recipe
   end
 
@@ -332,5 +337,97 @@ describe ITB do
     expect_status([ITB::Status::TripleClosed]) do
       pipe.max_workers(2)
     end
+  end
+  it "enumerates the shipped hash registry" do
+    names = ITB.hash_names
+    names.should_not be_empty
+    names.should contain("areion512")
+    names.should contain("aesitb128")
+    names.should_not contain("nope")
+  end
+
+  it "reports and restores GOMAXPROCS" do
+    original = ITB.set_gomaxprocs(0)
+    original.should be > 0
+    ITB.set_gomaxprocs(2).should eq original
+    ITB.set_gomaxprocs(0).should eq 2
+    ITB.set_gomaxprocs(original)
+  end
+
+  it "fills the pool-counter vector sized from its own length query" do
+    slots = ITB.pool_stats_len
+    slots.should be >= 9
+    counters = Slice(Int64).new(slots)
+    ITB.pool_stats(counters).should eq slots
+    counters[0].should be > 0
+    expect_status([ITB::Status::BufferTooSmall]) do
+      ITB.pool_stats(Slice(Int64).new(1))
+    end
+  end
+
+  it "writes a heap profile and reports a bad path" do
+    path = File.tempname("itb-crystal-heap", ".pprof")
+    ITB.write_heap_profile(path)
+    File.exists?(path).should be_true
+    File.size(path).should be > 0
+    File.delete(path)
+    expect_status([ITB::Status::BadInput]) do
+      ITB.write_heap_profile("/proc/itb-no-such-directory/heap.pprof")
+    end
+  end
+
+  it "round-trips a DRBG choice and carries it in the blob" do
+    plain = payload(2048, 76_u64)
+    ["csprng", "aesitb128"].each do |name|
+      sender = ITB::Pipeline.new("singlemsg-triple-mac-v1",
+        ITB::Opts.new.with_drbg(name))
+      blob = sender.save
+      receiver = ITB::Pipeline.load(blob)
+      receiver.decrypt_message(sender.encrypt_message(plain)).should eq plain
+      sender.decrypt_message(receiver.encrypt_message(plain)).should eq plain
+      # The choice is a recipe field: inspect reports it.
+      prof = ITB.inspect(blob)
+      prof.drbg.should eq name
+      prof.to_json.includes?(%("drbg":"#{name}")).should be_true
+    end
+  end
+
+  it "omits drbg by default" do
+    pipe = ITB::Pipeline.new("singlemsg-triple-mac-v1")
+    prof = ITB.inspect(pipe.save)
+    prof.drbg.should be_empty
+    prof.to_json.includes?("drbg").should be_false
+    registry = ITB.lookup("singlemsg-triple-mac-v1")
+    registry.drbg.should be_empty
+    registry.to_json.includes?("drbg").should be_false
+  end
+
+  it "keeps drbg on a registered copy of an inspected record" do
+    plain = payload(2048, 77_u64)
+    sender = ITB::Pipeline.new("singlemsg-triple-mac-v1",
+      ITB::Opts.new.with_drbg("csprng"))
+    # drbg is a recipe field and stays; the name and the
+    # inspection-only fields are cleared before registering.
+    copy = ITB.inspect(sender.save)
+    copy.name = ""
+    copy.nonce_bits = nil
+    copy.barrier_fill = nil
+    copy.container_mode = nil
+    copy.drbg.should eq "csprng"
+    ITB.register("crystal-binding-test-drbg-copy", copy)
+    back = ITB.lookup("crystal-binding-test-drbg-copy")
+    back.drbg.should eq "csprng"
+    back.to_json.includes?(%("drbg":"csprng")).should be_true
+    pipe = ITB::Pipeline.new("crystal-binding-test-drbg-copy")
+    receiver = ITB::Pipeline.load(pipe.save)
+    receiver.decrypt_message(pipe.encrypt_message(plain)).should eq plain
+  end
+
+  it "maps an unknown DRBG name to RecipePrimitiveUnknown" do
+    ex = expect_status([ITB::Status::RecipePrimitiveUnknown]) do
+      ITB::Pipeline.new("singlemsg-triple-mac-v1",
+        opts: ITB::Opts.new.with_drbg("nope"))
+    end
+    ex.message.not_nil!.should contain("nope")
   end
 end

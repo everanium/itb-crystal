@@ -28,7 +28,7 @@ end
 describe ITB do
   it "reports the library and binding versions" do
     ITB.version.should_not be_empty
-    ITB::VERSION.should eq "0.5.1"
+    ITB::VERSION.should eq "0.5.5"
   end
 
   it "reports the auto DRBG tier as a fill cipher" do

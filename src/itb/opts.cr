@@ -15,6 +15,11 @@ module ITB
       @pairs = [] of {String, String}
     end
 
+    # Container floor sizing mode (1 per-region, 2 per-container).
+    def with_mode(n : Int) : self
+      with_raw("mode", n.to_s)
+    end
+
     # Hex-encodes the parallax master override (`pm`).
     def with_perm_master(master : Bytes) : self
       with_raw("pm", master.hexstring)

@@ -28,7 +28,7 @@ end
 describe ITB do
   it "reports the library and binding versions" do
     ITB.version.should_not be_empty
-    ITB::VERSION.should eq "0.5.5"
+    ITB::VERSION.should eq "0.5.6"
   end
 
   it "reports the auto DRBG tier as a fill cipher" do
@@ -279,23 +279,28 @@ describe ITB do
     # barrier fill margin, and inspect surfaces both.
     pipe = ITB::Pipeline.new("streaming-aead-triple-mac-v1")
     prof = ITB.inspect(pipe.save)
+    prof.container_mode.should eq 1
     prof.nonce_bits.should eq 512
     prof.barrier_fill.should eq 1
 
     # Per-Pipeline overrides travel through the blob into inspect.
     tuned = ITB::Pipeline.new("streaming-aead-triple-mac-v1",
-      ITB::Opts.new.with_nonce_bits(256).with_barrier_fill(4))
+      ITB::Opts.new.with_mode(2).with_nonce_bits(256).with_barrier_fill(4))
     tuned_prof = ITB.inspect(tuned.save)
+    tuned_prof.container_mode.should eq 2
     tuned_prof.nonce_bits.should eq 256
     tuned_prof.barrier_fill.should eq 4
+    tuned_prof.to_json.includes?(%("container_mode":2)).should be_true
     tuned_prof.to_json.includes?(%("nonce_bits":256)).should be_true
     tuned_prof.to_json.includes?(%("barrier_fill":4)).should be_true
 
     # The registry entry is the recipe alone — neither field is part
     # of it, so both read as absent rather than as zero.
     registry = ITB.lookup("streaming-aead-triple-mac-v1")
+    registry.container_mode.should be_nil
     registry.nonce_bits.should be_nil
     registry.barrier_fill.should be_nil
+    registry.to_json.includes?("container_mode").should be_false
     registry.to_json.includes?("nonce_bits").should be_false
     registry.to_json.includes?("barrier_fill").should be_false
   end

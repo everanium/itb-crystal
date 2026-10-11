@@ -126,7 +126,7 @@ fluent chaining. The blob the receiver loads carries the resolved
 shape, so `load` takes no opts:
 
 ```crystal
-opts = ITB::Opts.new.with_chunk_size(65536).with_wrapper(false)
+opts = ITB::Opts.new.with_mode(2).with_chunk_size(65536).with_wrapper(false)
 sender = ITB::Pipeline.new("singlemsg-triple-mac-v1", opts: opts)
 receiver = ITB::Pipeline.load(sender.save)
 ```

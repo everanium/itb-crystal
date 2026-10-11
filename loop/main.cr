@@ -742,32 +742,6 @@ module Loop
     log_line(line)
   end
 
-  # Sets the inner blob's "mode" field of a wrap-layer session blob to
-  # *target_mode* (1 = per-region, 2 = per-container) in place. The wrap
-  # layer's profile record carries its own "mode" (a string), so the
-  # search starts at the inner blob ("ib"); both shipped modes are one
-  # digit wide, so the blob length does not change. Returns false when
-  # the inner blob or its mode field is not found.
-  def self.edit_inner_blob_mode(blob : Bytes, target_mode : Int32) : Bool
-    find = ->(needle : Bytes, start : Int32) do
-      (start..blob.size - needle.size).each do |i|
-        return i if blob[i, needle.size] == needle
-      end
-      -1
-    end
-    ib_key = %("ib":{).to_slice
-    mode_key = %("mode":).to_slice
-    ib = find.call(ib_key, 0)
-    return false if ib < 0
-    mode = find.call(mode_key, ib + ib_key.size)
-    return false if mode < 0
-    at = mode + mode_key.size
-    return false if at + 1 >= blob.size || blob[at] < '1'.ord || blob[at] > '2'.ord ||
-                    (blob[at + 1] >= '0'.ord && blob[at + 1] <= '9'.ord)
-    blob[at] = ('0'.ord + target_mode).to_u8
-    true
-  end
-
   # Constructs one Pipeline against *profile* with every flag-carried
   # override in the opts string (zero values included — the shared
   # library treats zero as "profile default"), then obtains the Init
@@ -776,6 +750,7 @@ module Loop
   # reopens use the retained blob; save is never called again.
   def self.build_pipeline(cfg : Config, profile : String) : {ITB::Pipeline, Bytes}?
     opts = ITB::Opts.new
+      .with_mode(cfg.blob_mode)
       .with_inner_hash(cfg.hash)
       .with_mac_name(cfg.mac)
       .with_parallax(cfg.parallax)
@@ -805,23 +780,6 @@ module Loop
     rescue e : ITB::Error
       err_line("Save(#{profile}): #{detail(e)}")
       return nil
-    end
-    if cfg.blob_mode == 2
-      # The sizing mode is not an Opts knob: the Init blob is edited and
-      # the pipeline reopened from it, so the retained blob (the one
-      # blob-cycle reopens from) carries the edited mode.
-      unless edit_inner_blob_mode(blob, 2)
-        err_line("rewrite blob mode: inner blob mode field not found")
-        return nil
-      end
-      begin
-        fresh = ITB::Pipeline.load(blob)
-      rescue e : ITB::Error
-        err_line("reload Mode 2 blob: #{detail(e)}")
-        return nil
-      end
-      pipe.free
-      pipe = fresh
     end
     log_pipeline_initialised(profile, blob)
     {pipe, blob}

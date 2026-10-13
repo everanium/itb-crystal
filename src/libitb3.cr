@@ -25,7 +25,7 @@ require "./itb/stream"
 
 module ITB
   # Binding version (matches shard.yml).
-  VERSION = "0.5.6"
+  VERSION = "0.6.1"
 
   # Floor capacity for profile-JSON output buffers (inspect / lookup
   # / profiles).

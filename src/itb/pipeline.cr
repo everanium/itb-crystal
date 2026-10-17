@@ -33,6 +33,48 @@ module ITB
       @handle = handle
     end
 
+    # Constructs a Pipeline from caller-supplied master keys (8 for
+    # MAC profiles, 7 for No-MAC profiles, plus optional Parallax and
+    # Wrapper masters) (`ITB_Triple_InitKeys`). Key counts, lengths, and
+    # pairwise distinctness are validated by libitb3.
+    def self.init_keys(profile : String, masters : Array(Bytes), opts : Opts? = nil) : Pipeline
+      opts_s = (opts || Opts.new).build
+      flat_len = 0
+      masters.each { |m| flat_len += m.size }
+      flat = Bytes.new(flat_len)
+      begin
+        lens = Slice(LibC::SizeT).new(masters.size)
+        off = 0
+        masters.each_with_index do |m, i|
+          lens[i] = LibC::SizeT.new(m.size)
+          if m.size > 0
+            flat[off, m.size].copy_from(m)
+            off += m.size
+          end
+        end
+        flat_p = flat_len > 0 ? flat.to_unsafe.as(Void*) : Pointer(Void).null
+        flat_sz = LibC::SizeT.new(flat_len)
+        lens_p = masters.size > 0 ? lens.to_unsafe : Pointer(LibC::SizeT).null
+        count_sz = LibC::SizeT.new(masters.size)
+        handle = Handle.zero
+        ITB.retry_once(BLOB_CAP) do |buf, len_p|
+          buf_p = buf.to_unsafe.as(Void*)
+          buf_sz = LibC::SizeT.new(buf.size)
+          ITB.blocking(->{ LibItb3.triple_init_keys(profile, opts_s,
+            flat_p, flat_sz, lens_p, count_sz,
+            buf_p, buf_sz, len_p, pointerof(handle)) })
+        end
+        new(handle)
+      ensure
+        flat.fill(0_u8)
+      end
+    end
+
+    # :ditto:
+    def self.init_keys(profile : String, opts : Opts?, masters : Array(Bytes)) : Pipeline
+      init_keys(profile, masters, opts)
+    end
+
     # :nodoc:
     protected def initialize(@handle : Handle)
     end

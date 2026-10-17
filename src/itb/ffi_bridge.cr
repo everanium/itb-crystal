@@ -66,6 +66,11 @@ lib LibItb3
   fun triple_init = ITB_Triple_Init(profile : LibC::Char*, opts : LibC::Char*,
                                     blob_out : Void*, blob_cap : LibC::SizeT, blob_len : LibC::SizeT*,
                                     out_handle : LibC::SizeT*) : LibC::Int
+  fun triple_init_keys = ITB_Triple_InitKeys(profile : LibC::Char*, opts : LibC::Char*,
+                                             masters_flat : Void*, masters_flat_len : LibC::SizeT,
+                                             master_lens : LibC::SizeT*, masters_count : LibC::SizeT,
+                                             blob_out : Void*, blob_cap : LibC::SizeT, blob_len : LibC::SizeT*,
+                                             out_handle : LibC::SizeT*) : LibC::Int
   fun triple_load = ITB_Triple_Load(blob : Void*, blob_len : LibC::SizeT,
                                     perm_master : Void*, perm_master_len : LibC::SizeT,
                                     wrap_master : Void*, wrap_master_len : LibC::SizeT,

@@ -12,7 +12,7 @@ bindings — no external shard dependencies, no C glue code. The
 compiled binaries link `libitb3.so` directly, and every hash-name /
 MAC-name / cipher-name / profile-name is an opaque string passed
 through to Go for validation — the binding carries no ITB construction
-logic. The public surface is the `ITB::Pipeline` class (init / load
+logic. The public surface is the `ITB::Pipeline` class (init / init_keys / load
 / save / rekey / close, Single Message encrypt / decrypt,
 one-shot and incremental stream sessions), the fluent
 `ITB::Opts` query-string builder, the `ITB::Profile` record with the
@@ -130,6 +130,8 @@ opts = ITB::Opts.new.with_mode(2).with_chunk_size(65536).with_wrapper(false)
 sender = ITB::Pipeline.new("singlemsg-triple-mac-v1", opts: opts)
 receiver = ITB::Pipeline.load(sender.save)
 ```
+
+`ITB::Pipeline.init_keys` constructs a Pipeline from caller-supplied master keys (8 for MAC profiles, 7 for No-MAC profiles, plus optional Parallax and Wrapper masters; each >= 16 bytes and pairwise distinct) instead of sampling fresh entropy via `Pipeline.new`.
 
 `Pipeline#rekey` rotates the parallax + wrapper masters mid-session
 (the eight ITB seeds and MAC key are fixed for the session lifetime

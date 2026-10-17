@@ -28,7 +28,7 @@ end
 describe ITB do
   it "reports the library and binding versions" do
     ITB.version.should_not be_empty
-    ITB::VERSION.should eq "0.7.2"
+    ITB::VERSION.should eq "0.7.3"
   end
 
   it "reports the auto DRBG tier as a fill cipher" do
@@ -61,6 +61,31 @@ describe ITB do
       wire = sender.encrypt_message(plain)
       wire.should_not eq plain
       receiver.decrypt_message(wire).should eq plain
+    end
+  end
+
+  it "constructs a deterministic Pipeline via init_keys and rejects invalid keys" do
+    masters = Array(Bytes).new(8) { |i| Bytes.new(32, (0x11 * (i + 1)).to_u8) }
+    k1 = ITB::Pipeline.init_keys("singlemsg-triple-mac-v1", masters)
+    k2 = ITB::Pipeline.init_keys("singlemsg-triple-mac-v1", masters, ITB::Opts.new)
+    k1.save.should eq k2.save
+
+    plain = payload(512, 99_u64)
+    wire = k1.encrypt_message(plain)
+    k2.decrypt_message(wire).should eq plain
+    k1.free
+    k2.free
+
+    dup_masters = masters.dup
+    dup_masters[1] = dup_masters[0]
+    expect_status([ITB::Status::BadInput]) do
+      ITB::Pipeline.init_keys("singlemsg-triple-mac-v1", dup_masters)
+    end
+
+    short_masters = masters.dup
+    short_masters[0] = Bytes.new(8, 0x11_u8)
+    expect_status([ITB::Status::BadInput]) do
+      ITB::Pipeline.init_keys("singlemsg-triple-mac-v1", short_masters)
     end
   end
 

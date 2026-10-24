@@ -25,11 +25,12 @@ module ITB
     def initialize(profile : String, opts : Opts = Opts.new)
       opts_s = opts.build
       handle = Handle.zero
-      ITB.retry_once(BLOB_CAP) do |buf, len_p|
+      blob = ITB.retry_once(BLOB_CAP) do |buf, len_p|
         ITB.blocking(->{ LibItb3.triple_init(profile, opts_s,
           buf.to_unsafe.as(Void*), LibC::SizeT.new(buf.size), len_p,
           pointerof(handle)) })
       end
+      blob.fill(0_u8)
       @handle = handle
     end
 
@@ -57,13 +58,14 @@ module ITB
         lens_p = masters.size > 0 ? lens.to_unsafe : Pointer(LibC::SizeT).null
         count_sz = LibC::SizeT.new(masters.size)
         handle = Handle.zero
-        ITB.retry_once(BLOB_CAP) do |buf, len_p|
+        blob = ITB.retry_once(BLOB_CAP) do |buf, len_p|
           buf_p = buf.to_unsafe.as(Void*)
           buf_sz = LibC::SizeT.new(buf.size)
           ITB.blocking(->{ LibItb3.triple_init_keys(profile, opts_s,
             flat_p, flat_sz, lens_p, count_sz,
             buf_p, buf_sz, len_p, pointerof(handle)) })
         end
+        blob.fill(0_u8)
         new(handle)
       ensure
         flat.fill(0_u8)
@@ -274,8 +276,12 @@ module ITB
     len = LibC::SizeT.zero
     rc = yield buf, pointerof(len)
     if rc == Status::BufferTooSmall.value && len > buf.size
+      buf.fill(0_u8)
       buf = Bytes.new(len)
       rc = yield buf, pointerof(len)
+    end
+    if rc != Status::Ok.value
+      buf.fill(0_u8)
     end
     check(rc)
     buf[0, len]

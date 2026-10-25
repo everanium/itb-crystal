@@ -220,6 +220,7 @@ module Loop
         io << ",\"blob_mode\":" << cfg.blob_mode
         io << ",\"drbg\":" << json_string(cfg.drbg)
         io << ",\"drbg_auto_tier\":" << json_string(ITB.drbg_auto_tier)
+        io << ",\"interlock\":" << json_string(cfg.interlock)
         io << ",\"chunk_size_bytes\":" << cfg.chunk_size
         io << ",\"barrier_fill\":" << cfg.barrier_fill
         io << ",\"parallax\":\"" << on_off(cfg.parallax) << '"'

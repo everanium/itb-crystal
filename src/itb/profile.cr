@@ -55,6 +55,8 @@ module ITB
     property container_mode : Int32?
     # DRBG fill primitive name (`drbg`); empty for the auto tier.
     property drbg : String
+    # Interlocked Barrier chunk width (`interlock`, `"48"` or `"168"`); empty for the 48-bit default.
+    property interlock : String
     # MAC name (`mac`); empty on a No MAC profile.
     property mac : String
     # Tag stub size (`tagstub`); 0 when absent.
@@ -77,7 +79,7 @@ module ITB
                    @tag_stub = 0, @chunk = 0, @wrapper = false, @outer = "",
                    @parallax = false, @palette = [] of String, @segment = 0,
                    @nonce_bits = nil, @barrier_fill = nil,
-                   @container_mode = nil, @drbg = "")
+                   @container_mode = nil, @drbg = "", @interlock = "")
     end
 
     # Renders the record as the wire JSON object.
@@ -100,6 +102,7 @@ module ITB
             j.field "container_mode", cm
           end
           j.field "drbg", @drbg unless @drbg.empty?
+          j.field "interlock", @interlock unless @interlock.empty?
           j.field "mac", @mac unless @mac.empty?
           j.field "tagstub", @tag_stub unless @tag_stub == 0
           j.field "chunk", @chunk unless @chunk == 0
@@ -127,6 +130,7 @@ module ITB
         barrier_fill: m["barrier_fill"]?.try(&.as_i?),
         container_mode: m["container_mode"]?.try(&.as_i?),
         drbg: m["drbg"]?.try(&.as_s) || "",
+        interlock: m["interlock"]?.try(&.as_s) || "",
         mac: m["mac"]?.try(&.as_s) || "",
         tag_stub: m["tagstub"]?.try(&.as_i) || 0,
         chunk: m["chunk"]?.try(&.as_i) || 0,

@@ -20,6 +20,11 @@ module ITB
       with_raw("mode", n.to_s)
     end
 
+    # Interlocked Barrier chunk width (`"48"` or `"168"`).
+    def with_interlock(interlock : String) : self
+      with_raw("interlock", interlock)
+    end
+
     # Hex-encodes the parallax master override (`pm`).
     def with_perm_master(master : Bytes) : self
       with_raw("pm", master.hexstring)

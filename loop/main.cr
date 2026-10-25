@@ -88,6 +88,7 @@ module Loop
     property chunk_size = 0_i64        # 0 = profile default
     property barrier_fill = 0          # 0 = profile default
     property drbg = ""                 # DRBG fill primitive; empty = profile default (auto tier)
+    property interlock = ""            # Interlocked Barrier chunk width: 48 | 168; empty = profile default
     property gomaxprocs = 0            # 0 = inherit from the environment
     property rekey_every = 0_i64       # per-worker iterations between rotations; 0 = never
     property blob_cycle_every = 0_i64  # per-worker iterations between reopens; 0 = never
@@ -268,6 +269,7 @@ module Loop
     property gomaxprocs = 0
     property goroutines = 3
     property hash = "areion512"
+    property interlock = ""
     property iterations = 0_i64
     property json_output = false
     property key_bits = 0
@@ -385,6 +387,8 @@ module Loop
       "concurrent workers (1..10); on runtimes without parallelism values above 1 are clamped to 1")
     add_str.call("hash", "string", ->{ f.hash }, ->(v : String) { f.hash = v; nil },
       "inner ITB hash primitive name")
+    add_str.call("interlock", "string", ->{ f.interlock }, ->(v : String) { f.interlock = v; nil },
+      "Interlocked Barrier chunk width: 48 | 168; empty = profile default (48; 168 requires 512-bit hash)")
     add_i64.call("iterations", ->(v : Int64) { f.iterations = v; nil },
       "fixed per-worker iteration count; 0 = duration-based")
     add_bool.call("json-output", ->(v : Bool) { f.json_output = v; nil },
@@ -680,6 +684,11 @@ module Loop
       return {-1, cfg}
     end
     cfg.drbg = f.drbg # validated by Init: the C ABI enumerates no DRBG names
+    cfg.interlock = f.interlock
+    unless ["", "48", "168"].includes?(cfg.interlock)
+      err_line("--interlock must be 48 | 168 (or empty = profile default), got \"#{cfg.interlock}\"")
+      return {-1, cfg}
+    end
     chunk = parse_size(f.chunk_size)
     if chunk.nil?
       err_line("--chunk-size: invalid size \"#{f.chunk_size}\"")
@@ -739,6 +748,7 @@ module Loop
            "wrapper=#{on_off(record.wrapper)}"
     line += " container-mode=2" if record.container_mode == 2
     line += " drbg=#{record.drbg}" unless record.drbg.empty?
+    line += " interlock=#{record.interlock}" unless record.interlock.empty?
     log_line(line)
   end
 
@@ -759,6 +769,7 @@ module Loop
       .with_nonce_bits(cfg.nonce_bits)
       .with_barrier_fill(cfg.barrier_fill)
       .with_drbg(cfg.drbg)
+      .with_interlock(cfg.interlock)
       .with_chunk_size(cfg.chunk_size)
     unless cfg.profile.empty?
       filled = fill_keystream_layers(cfg.profile, opts, cfg.parallax, cfg.wrapper)
@@ -844,7 +855,8 @@ module Loop
              "payload-mode=#{payload_mode_name(cfg.payload_mode)} seed=#{cfg.seed} " \
              "json-output=#{cfg.json_output}" \
              "#{cfg.blob_mode != 1 ? " blob-mode=#{cfg.blob_mode}" : ""}" \
-             "#{cfg.drbg.empty? ? "" : " drbg=#{cfg.drbg}"}")
+             "#{cfg.drbg.empty? ? "" : " drbg=#{cfg.drbg}"}" \
+             "#{cfg.interlock.empty? ? "" : " interlock=#{cfg.interlock}"}")
     log_line("policy: microbatch-tiers=#{policy_label("ITB_MICROBATCH_TIERS")} " \
              "hashpool-starters=#{policy_label("ITB_HASHPOOL_STARTERS")}")
 

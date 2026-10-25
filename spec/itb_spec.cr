@@ -28,7 +28,7 @@ end
 describe ITB do
   it "reports the library and binding versions" do
     ITB.version.should_not be_empty
-    ITB::VERSION.should eq "0.7.5"
+    ITB::VERSION.should eq "0.8.1"
   end
 
   it "reports the auto DRBG tier as a fill cipher" do
@@ -459,5 +459,34 @@ describe ITB do
         opts: ITB::Opts.new.with_drbg("nope"))
     end
     ex.message.not_nil!.should contain("nope")
+  end
+
+  it "round-trips interlock 168, carries it in the blob, and rejects invalid inputs" do
+    plain = payload(2048, 78_u64)
+    sender = ITB::Pipeline.new("singlemsg-triple-mac-v1",
+      ITB::Opts.new.with_interlock("168"))
+    blob = sender.save
+    receiver = ITB::Pipeline.load(blob)
+    receiver.decrypt_message(sender.encrypt_message(plain)).should eq plain
+    sender.decrypt_message(receiver.encrypt_message(plain)).should eq plain
+
+    prof = ITB.inspect(blob)
+    prof.interlock.should eq "168"
+    prof.to_json.includes?(%("interlock":"168")).should be_true
+
+    def_pipe = ITB::Pipeline.new("singlemsg-triple-mac-v1")
+    def_prof = ITB.inspect(def_pipe.save)
+    def_prof.interlock.should be_empty
+    def_prof.to_json.includes?("interlock").should be_false
+
+    expect_status([ITB::Status::BadInput]) do
+      ITB::Pipeline.new("singlemsg-triple-mac-v1",
+        opts: ITB::Opts.new.with_inner_hash("blake3").with_interlock("168"))
+    end
+
+    expect_status([ITB::Status::BadInput]) do
+      ITB::Pipeline.new("singlemsg-triple-mac-v1",
+        opts: ITB::Opts.new.with_interlock("96"))
+    end
   end
 end

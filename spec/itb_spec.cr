@@ -28,7 +28,7 @@ end
 describe ITB do
   it "reports the library and binding versions" do
     ITB.version.should_not be_empty
-    ITB::VERSION.should eq "0.9.0"
+    ITB::VERSION.should eq "0.9.1"
   end
 
   it "reports the auto DRBG tier as a fill cipher" do
@@ -318,6 +318,12 @@ describe ITB do
     tuned_prof.to_json.includes?(%("container_mode":2)).should be_true
     tuned_prof.to_json.includes?(%("nonce_bits":256)).should be_true
     tuned_prof.to_json.includes?(%("barrier_fill":4)).should be_true
+
+    tuned3 = ITB::Pipeline.new("streaming-aead-triple-mac-v1",
+      ITB::Opts.new.with_mode(3))
+    tuned_prof3 = ITB.inspect(tuned3.save)
+    tuned_prof3.container_mode.should eq 3
+    tuned_prof3.to_json.includes?(%("container_mode":3)).should be_true
 
     # The registry entry is the recipe alone — neither field is part
     # of it, so both read as absent rather than as zero.

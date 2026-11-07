@@ -84,7 +84,7 @@ module Loop
     property profile = ""              # empty = shape-based profile pair
     property key_bits = 0              # 0 = profile default
     property nonce_bits = 0            # 0 = profile default
-    property blob_mode = 1             # container floor sizing mode: 1 (per-region, default) | 2 (per-container)
+    property blob_mode = 1             # container floor sizing mode: 1 (per-region, default) | 2 (per-container) | 3 (gauss-posit)
     property chunk_size = 0_i64        # 0 = profile default
     property barrier_fill = 0          # 0 = profile default
     property drbg = ""                 # DRBG fill primitive; empty = profile default (auto tier)
@@ -372,7 +372,7 @@ module Loop
     add_i64.call("blob-cycle-every", ->(v : Int64) { f.blob_cycle_every = v; nil },
       "reopen each pipeline from its session blob every N iterations per worker; 0 = never")
     add_int.call("blob-mode", ->{ f.blob_mode }, ->(v : Int32) { f.blob_mode = v; nil },
-      "container floor sizing mode: 1 (per-region, default) | 2 (per-container)")
+      "container floor sizing mode: 1 (per-region, default) | 2 (per-container) | 3 (gauss-posit)")
     add_str.call("chunk-size", "string", ->{ f.chunk_size }, ->(v : String) { f.chunk_size = v; nil },
       "streaming chunk-size budget (e.g. 4MB); 0 = profile default; inert for pure message shape")
     add_str.call("drbg", "string", ->{ f.drbg }, ->(v : String) { f.drbg = v; nil },
@@ -674,8 +674,8 @@ module Loop
       return {-1, cfg}
     end
     cfg.blob_mode = f.blob_mode
-    unless [1, 2].includes?(cfg.blob_mode)
-      err_line("--blob-mode must be 1 (per-region) | 2 (per-container), got #{cfg.blob_mode}")
+    unless [1, 2, 3].includes?(cfg.blob_mode)
+      err_line("--blob-mode must be 1 (per-region) | 2 (per-container) | 3 (gauss-posit), got #{cfg.blob_mode}")
       return {-1, cfg}
     end
     cfg.barrier_fill = f.barrier_fill
@@ -746,7 +746,7 @@ module Loop
            "mac=#{record.mac.empty? ? "-" : record.mac} " \
            "parallax=#{on_off(record.parallax)} " \
            "wrapper=#{on_off(record.wrapper)}"
-    line += " container-mode=2" if record.container_mode == 2
+    line += " container-mode=#{record.container_mode}" if record.container_mode == 2 || record.container_mode == 3
     line += " drbg=#{record.drbg}" unless record.drbg.empty?
     line += " interlock=#{record.interlock}" unless record.interlock.empty?
     log_line(line)
